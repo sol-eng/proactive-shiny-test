@@ -1,0 +1,102 @@
+---
+title: "Continuous Shiny Test"
+output: html_document
+resource_files:
+- shinycannon.sh
+- recording.log
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(shinyloadtest)
+library(fs)
+library(vroom)
+library(purrr)
+library(blastula)
+library(lubridate)
+app_url <- "https://colorado.rstudio.com/rsc/helloshiny"
+```
+
+This is a demo of how to use R Markdown to proactively test for shiny application failures. It can be very annoying if a user discovers that a shiny application is broken! To prevent this scenario, you can proactively test your shiny app on a regular interval by publishing and scheduling this RMD.
+
+If the app test is successful, this RMD reports some simple timing information to create a record of how your app is responding.
+
+If the app test fails, this RMD sends you an email alerting you to the problem.
+
+Application tests can be as simple or as involved as you want, taking full advantage of the shinyloadtest framework for recording and replaying tests.
+
+App to test: https://colorado.rstudio.com/rsc/helloshiny
+
+
+## Step 1: Create a test
+
+This is only done once and is not included in our regular scheduled rendering.
+
+```{r eval=FALSE}
+shinyloadtest::record_session(
+  target_app_url = app_url,
+  open_browser = FALSE
+)
+```
+
+## Step 2 - Run the test
+
+This step has a couple of pre-reqs:
+
+1. You must have Java downloaded and installed on the path
+
+2. You must have the shinycannon.sh file be executable. You can wget it from here: https://rstudio.github.io/shinyloadtest/articles/shinycannon.html (use the mac link, not the deb)
+
+Be sure to update the command to use the correct URL, and to include connect auth if necessary!
+
+
+```{bash results='hide'}
+chmod +x ./shinycannon.sh
+./shinycannon.sh ./recording.log 'https://colorado.rstudio.com/rsc/helloshiny' --overwrite-output --loaded-duration-minutes 1 --output-dir test --log-level info
+```
+
+## Step 3 - Determine results
+
+The prior step generates some logs in a test directory which we can use to display success criteria or alert on failure.
+
+
+
+```{r message=FALSE}
+# check playback sessions for failures
+Sys.setenv("VROOM_SHOW_PROGRESS"="false")
+
+files <- fs::dir_ls("test/sessions")
+check_failure <- function(rel_filepath) {
+  res <- vroom::vroom(rel_filepath, delim = ",",skip = 2 )
+  "PLAYBACK_FAIL" %in% res$event
+}
+test_results <- map_lgl(files, check_failure)
+
+if(sum(test_results) > 0 ){
+  failed <- TRUE
+  sprintf("Unfortunately %d tests failed", sum(test_results))
+} else {
+  failed <- FALSE
+  sprintf("All tests were successful!")
+}
+```
+
+## Step 4 - Do some conditional alerting
+
+```{r}
+if (!failed) {
+  timing_results <- load_runs("test")
+  p1 <- slt_hist_loadtimes(timing_results)
+  p2 <- slt_http_latency(timing_results)
+  p3 <- slt_websocket_latency(timing_results)
+  blastula::suppress_scheduled_email()
+  list(p1,p2,p3)
+} else {
+  blastula::render_connect_email(
+    "alert-email.Rmd"
+  ) %>% 
+  blastula::attach_connect_email(
+    subject = sprintf("App Content Failure: %s ", app_url)
+  )
+}
+```

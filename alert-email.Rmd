@@ -1,0 +1,9 @@
+---
+output: blastula::blastula_email
+---
+
+Hi Team,
+
+The application at `r app_url` is currently not working. You may consider swapping its vanity URL to a "Under Construction" HTML place holder, or otherwise notifying viewers that the app is temporarily offline.
+
+- Connect Test Bot
